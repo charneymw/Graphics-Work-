@@ -1,0 +1,468 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Three.js Raycaster Game</title>
+    <style>
+        html, body {
+            margin: 0;
+            overflow: hidden;
+        }
+        canvas {
+            display: block;
+        }
+        #ui-overlay {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            color: white;
+            background-color: rgba(0, 0, 0, 0.5);
+            padding: 10px;
+            border-radius: 8px;
+        }
+    </style>
+    <script src="resources/three.min.js"></script>
+    <script>
+        "use strict";
+
+
+
+        var scene, camera, renderer;  // Three.js rendering basics.
+
+        var canvas;  // The canvas on which the renderer will draw.
+                     // This will be created by the renderer, and it will
+                     // be added to the body of the page.
+
+        var gun;  // The gun, which can be "aimed" by the mouse.
+        var gunbase;  // The cylinder at the base of the gun; the gun is a child of this cylinder.
+        var ray;  // A yellow "ray" from the barrel of the gun.
+        var rayVector;  // The gun and the ray point from (0,0,0) towards this vector
+                        //        (in the local coordinate system of the gunbase).
+
+        var gunRotateY = 0;  // Amount by which gun is rotated around the y-axis
+                             //    (carrying the camera with it).
+        var cubeTexture;   // needed to make this global else "undefined"
+        var objects = [];
+        var raycaster;
+        var destroyedBalls = 0;
+        var fireRate = 5000; // Toggle visibility every 5000 ms (2 seconds)
+        var lastToggleTime = 0;
+
+
+
+        /**
+         Creates a Texture from an image.  No error checking is done here,
+         and no callback function is implemented.
+         */
+
+        function updateUI() {
+            document.getElementById("destroyed").innerHTML = "" + destroyedBalls;
+        }
+
+
+        function make_texture(image) {
+            var loader = new THREE.TextureLoader();
+            var texture = loader.load(image.src);
+            return texture;
+        }
+
+        function makeCubeTexture(filenames, path) {
+            var URLs;
+            if (path) {
+                URLs = [];
+                for (var i = 0; i < 6; i++)
+                    URLs.push(path + filenames[i]);
+            } else {
+                URLs = filenames;
+            }
+            var loader = new THREE.CubeTextureLoader();
+            var texture = loader.load(URLs);
+            return texture;
+        }
+
+        /**
+         *  Creates the bouncing balls and the translucent cube in which the balls bounce,
+         *  and adds them to the scene.  A light that shines from the direction of the
+         *  camera's view is also bundled with the camera and added to the scene.
+         */
+        function createWorld() {
+
+            renderer.setClearColor(0);  // black background
+            scene = new THREE.Scene();
+            camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 1, 1000);
+
+            /* Add the camera and a light to the scene, linked into one object. */
+            var light = new THREE.DirectionalLight();
+            light.position.set(0, 0, 1);
+            camera.position.set(0, 40, 100);
+            camera.rotation.x = -Math.PI / 9; //camera looks down a bit
+            camera.add(light);
+            scene.add(new THREE.DirectionalLight(0x808080));
+
+            var ground = new THREE.Mesh(
+                new THREE.PlaneGeometry(10, 20), // Looks like a lily pad
+                new THREE.MeshLambertMaterial({
+                    color: "white",
+                    map: makeTexture("aligator.jpg")
+                })
+            );
+            ground.rotation.x = -Math.PI / 2;
+            ground.position.y = -1;
+            scene.add(ground);
+
+            var gunmat = new THREE.MeshLambertMaterial({
+                color: 0xaaaaff
+            });
+            gun = new THREE.Mesh(new THREE.SphereGeometry(1.5, 16, 8), gunmat);
+            var barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.7, 5, 16), gunmat);
+            barrel.position.y = 2.5;
+            gun.add(barrel);
+            gunbase = new THREE.Mesh(new THREE.CylinderGeometry(3, 3, 0.5, 32), gunmat);
+
+            var linegeom = new THREE.Geometry();
+            linegeom.vertices.push(new THREE.Vector3(0, 0, 0));
+            linegeom.vertices.push(new THREE.Vector3(0, 100, 0));
+            ray = new THREE.Line(linegeom, new THREE.LineBasicMaterial({
+                color: 0xffaa00,
+                linewidth: 3
+            }));
+
+            gunbase.add(ray);
+            gunbase.add(camera);
+            gunbase.add(gun);
+            scene.add(gunbase);
+
+            var ballsData = [
+                { color: "green", position: { x: getRandomPosition(-50, 50), y: getRandomPosition(10, 40), z: getRandomPosition(-40, 40) }, velocity: { x: getRandomVelocity(), y: getRandomVelocity(), z: getRandomVelocity() }, direction: { x: getRandomDirection(), y: getRandomDirection(), z: getRandomDirection() } },
+                { color: "blue", position: { x: getRandomPosition(-50, 50), y: getRandomPosition(10, 40), z: getRandomPosition(-40, 40) }, velocity: { x: getRandomVelocity(), y: getRandomVelocity(), z: getRandomVelocity() }, direction: { x: getRandomDirection(), y: getRandomDirection(), z: getRandomDirection() } },
+                { color: "red", position: { x: getRandomPosition(-50, 50), y: getRandomPosition(10, 40), z: getRandomPosition(-40, 40) }, velocity: { x: getRandomVelocity(), y: getRandomVelocity(), z: getRandomVelocity() }, direction: { x: getRandomDirection(), y: getRandomDirection(), z: getRandomDirection() } },
+                { color: "yellow", position: { x: getRandomPosition(-50, 50), y: getRandomPosition(10, 40), z: getRandomPosition(-40, 40) }, velocity: { x: getRandomVelocity(), y: getRandomVelocity(), z: getRandomVelocity() }, direction: { x: getRandomDirection(), y: getRandomDirection(), z: getRandomDirection() } },
+                { color: "pink", position: { x: getRandomPosition(-50, 50), y: getRandomPosition(10, 40), z: getRandomPosition(-40, 40) }, velocity: { x: getRandomVelocity(), y: getRandomVelocity(), z: getRandomVelocity() }, direction: { x: getRandomDirection(), y: getRandomDirection(), z: getRandomDirection() } },
+                { color: "white", position: { x: getRandomPosition(-50, 50), y: getRandomPosition(10, 40), z: getRandomPosition(-40, 40) }, velocity: { x: getRandomVelocity(), y: getRandomVelocity(), z: getRandomVelocity() }, direction: { x: getRandomDirection(), y: getRandomDirection(), z: getRandomDirection() } }
+            ];
+
+
+            function getRandomVelocity() {
+                return Math.random() + 2;
+            }
+
+            function getRandomDirection() {
+                return Math.random() < 0.5 ? -.50 : .50;
+            }
+
+            function getRandomPosition(min, max) {
+                return Math.random() * (max - min) + min;
+            }
+
+
+
+            var balls = [];
+
+            for (var i = 0; i < ballsData.length; i++) {
+                var ballGeometry = new THREE.SphereGeometry(4.5, 16, 16);
+                var ballMaterial = new THREE.MeshBasicMaterial({ color: ballsData[i].color });
+                var ball = new THREE.Mesh(ballGeometry, ballMaterial);
+
+                ball.position.set(ballsData[i].position.x, ballsData[i].position.y, ballsData[i].position.z);
+
+                objects.push(ball);
+                balls.push(ball);
+
+                scene.add(ball);
+            }
+
+            // Create a BoxGeometry
+            var boxGeometry = new THREE.BoxGeometry(10, 10, 10);
+            var boxMaterial = new THREE.MeshBasicMaterial({ color: "white" });
+            var box = new THREE.Mesh(boxGeometry, boxMaterial);
+            box.position.set(10, 20, -10);
+            objects.push(box);
+            scene.add(box);
+
+            raycaster = new THREE.Raycaster( new THREE.Vector3(0,0,0), new THREE.Vector3(0,1,0) );
+
+
+            cubeTexture = makeCubeTexture(
+                ["px.jpg", "nx.jpg", "py.jpg", "ny.jpg", "pz.jpg", "nz.jpg"],
+                "resources/FishPond/"
+            );
+
+            var cubeShader = THREE.ShaderLib["cube"];
+            var cubeMaterial = new THREE.ShaderMaterial({
+                fragmentShader: cubeShader.fragmentShader,
+                vertexShader: cubeShader.vertexShader,
+                uniforms: cubeShader.uniforms,
+                depthWrite: false,
+                side: THREE.BackSide
+            });
+            cubeMaterial.uniforms["tCube"].value = cubeTexture;
+            var skybox = new THREE.Mesh(new THREE.BoxGeometry(500, 500, 500), cubeMaterial);
+            scene.add(skybox);
+
+        } // end createWorld
+
+
+
+        /**
+         *  When an animation is in progress, this function is called just before rendering each
+         *  frame of the animation.
+         */
+        var ball1, ball2;
+        var balls = [];
+        var ballsData = [
+            { color: "green", position: { x: getRandomPosition(-50, 50), y: getRandomPosition(10, 40), z: getRandomPosition(-40, 40) }, velocity: { x: getRandomVelocity(), y: getRandomVelocity(), z: getRandomVelocity() }, direction: { x: getRandomDirection(), y: getRandomDirection(), z: getRandomDirection() } },
+            { color: "blue", position: { x: getRandomPosition(-50, 50), y: getRandomPosition(10, 40), z: getRandomPosition(-40, 40) }, velocity: { x: getRandomVelocity(), y: getRandomVelocity(), z: getRandomVelocity() }, direction: { x: getRandomDirection(), y: getRandomDirection(), z: getRandomDirection() } },
+            { color: "red", position: { x: getRandomPosition(-50, 50), y: getRandomPosition(10, 40), z: getRandomPosition(-40, 40) }, velocity: { x: getRandomVelocity(), y: getRandomVelocity(), z: getRandomVelocity() }, direction: { x: getRandomDirection(), y: getRandomDirection(), z: getRandomDirection() } },
+            { color: "yellow", position: { x: getRandomPosition(-50, 50), y: getRandomPosition(10, 40), z: getRandomPosition(-40, 40) }, velocity: { x: getRandomVelocity(), y: getRandomVelocity(), z: getRandomVelocity() }, direction: { x: getRandomDirection(), y: getRandomDirection(), z: getRandomDirection() } },
+            { color: "pink", position: { x: getRandomPosition(-50, 50), y: getRandomPosition(10, 40), z: getRandomPosition(-40, 40) }, velocity: { x: getRandomVelocity(), y: getRandomVelocity(), z: getRandomVelocity() }, direction: { x: getRandomDirection(), y: getRandomDirection(), z: getRandomDirection() } },
+            { color: "white", position: { x: getRandomPosition(-50, 50), y: getRandomPosition(10, 40), z: getRandomPosition(-40, 40) }, velocity: { x: getRandomVelocity(), y: getRandomVelocity(), z: getRandomVelocity() }, direction: { x: getRandomDirection(), y: getRandomDirection(), z: getRandomDirection() } }
+        ];
+
+        function moveBalls(dt) {
+            for (var i = 0; i < balls.length; i++) {
+                var ball = balls[i];
+                var velocity = ballsData[i].velocity;
+
+
+                ball.position.x += velocity.x * dt;
+                ball.position.y += velocity.y * dt;
+                ball.position.z += velocity.z * dt;
+
+
+                if (ball.position.x <= -50 || ball.position.x >= 50) {
+                    velocity.x = -velocity.x;
+                    ball.position.x = ball.position.x <= -50 ? -50 : 50;
+                }
+
+
+                if (ball.position.y <= 10 || ball.position.y >= 40) {
+                    velocity.y = -velocity.y;
+                    ball.position.y = ball.position.y <= 10 ? 10 : 40;
+                }
+
+                if (ball.position.z <= -40 || ball.position.z >= 40) {
+                    velocity.z = -velocity.z;
+                    ball.position.z = ball.position.z <= -40 ? -40 : 40;
+                }
+
+                ball.material.color.set(ball.position.y < 20 ? 0xff0000 : 0x00ff00);
+            }
+        }
+
+
+
+        function updateForFrame() {
+            var dt = clock.getDelta();  // time since last update
+            var hitlist = raycaster.intersectObjects(objects);
+            // console.log("hit " + hitlist.length);
+            for (var i = 0; i < hitlist.length; i++) {
+                var hitObject = hitlist[i].object;
+                newhit(hitObject); // Update hit object status
+                removeHitObject(hitObject); // Remove hit object
+            }
+            // Move the balls
+            moveBalls(dt);
+
+        }
+
+        function removeHitObject(obj) {
+            if (obj !== null) {
+                var index = objects.indexOf(obj);
+                if (index !== -1) {
+                    objects.splice(index, 1); // Remove the hit object from the objects array
+                    destroyedBalls++;
+                    updateUI();
+                }
+                scene.remove(obj); // Remove the hit object from the scene
+
+                if (obj === ball1) {
+                    ball1 = null;
+                } else if (obj === ball2) {
+                    ball2 = null;
+                }
+            }
+        }
+
+        var hit = null;
+        function newhit(obj) {
+            if (obj != hit) {
+                if (hit != null) {
+                    // Restore the material color if needed
+                    hit.material.color.set(0xffff00);
+                    hit.material.needsUpdate = true;
+                }
+                if (obj != null) {
+                    hit = obj;
+                    obj.material.color.set(0xff0000);
+                    obj.material.needsUpdate = true;
+                } else {
+
+                    hit = null;
+                }
+            }
+        }
+
+
+        /**
+         *  Render the scene.  This is called for each frame of the animation, after updating
+         *  the position and velocity data of the balls.
+         */
+        function render() {
+            renderer.render(scene, camera);
+        }
+
+
+        /**
+         *  Creates and returns a Texture object that will read its image from the
+         *  specified URL. If the second paramter is provided, the texture will be
+         *  applied to the material when the
+         */
+        function makeTexture(imageURL, material) {
+            function callback() {
+                if (material) {
+                    material.map = texture;
+                    material.needsUpdate = true;
+                }
+
+            }
+
+            var loader = new THREE.TextureLoader();
+            var texture = loader.load(imageURL, callback);
+            texture.wrapS = THREE.RepeatWrapping;
+            texture.wrapT = THREE.RepeatWrapping;
+            texture.repeat = new THREE.Vector2(10, 10);
+            texture.anisotropy = renderer.getMaxAnisotropy();
+            return texture;
+        }
+
+
+        //----------------------------- mouse and key support -------------------------------
+
+        function doMouseDown(evt) {
+            var x = evt.clientX;
+            var y = evt.clientY;
+            console.log("Clicked mouse at " + x + "," + y);
+        }
+
+        function doMouseMove(evt) {
+            var x = evt.clientX;
+            var y = evt.clientY;
+            // mouse was moved to (x,y)
+            var rotZ = 5 * Math.PI / 6 * (window.innerWidth / 2 - x) / window.innerWidth;
+            var rotX = 5 * Math.PI / 6 * (y - window.innerHeight / 2) / window.innerHeight;
+            gun.rotation.set(rotX, 0, rotZ);
+            var rcMatrix = new THREE.Matrix4(); // The matrix representing the gun rotation,
+                                                //    so we can apply it to the ray direction.
+            rcMatrix.makeRotationFromEuler(gun.rotation); // Get the rotation, as a matrix.
+            rayVector = new THREE.Vector3(0, 1, 0);  // Untransformed rayVector
+            rayVector.applyMatrix4(rcMatrix);  // Apply the rotation matrix
+            ray.geometry.vertices[1].set(rayVector.x * 100, rayVector.y * 100, rayVector.z * 100);
+            ray.geometry.verticesNeedUpdate = true;
+
+            var transformedRayVec = rayVector.clone();
+            gunbase.localToWorld(transformedRayVec);
+
+            raycaster.set(new THREE.Vector3(0,0,0), transformedRayVec);
+        }
+
+        function doKeyDown(evt) {
+            var code = evt.keyCode;
+            // console.log("Key pressed with code " + code);
+            var rot = 0;
+            if (code == 65 || code == 37) {
+                rot = 0.02;
+            } else if (code == 68 || code == 39) {
+                rot = -0.02;
+            }
+            if (evt.shiftKey)
+                rot *= 5;
+            if (rot != 0) {
+                gunRotateY += rot;
+                gunbase.rotation.y = gunRotateY;
+                evt.stopPropagation();
+                var transformedRayVec = rayVector.clone();
+                gunbase.localToWorld(transformedRayVec);
+
+                raycaster.set(new THREE.Vector3(0,0,0), transformedRayVec);
+            }
+        }
+
+        //--------------------------- animation support -----------------------------------
+
+        var clock;  // Keeps track of elapsed time of animation.
+
+        function doFrame() {
+            var dt = clock.getDelta();
+            var elapsedTime = clock.getElapsedTime() * 1000;  // convert to milliseconds
+
+            if (elapsedTime - lastToggleTime > fireRate) {
+                ray.material.visible = !ray.material.visible;
+                ray.material.needsUpdate = true;
+                lastToggleTime = elapsedTime;  // reset the timer
+            }
+            updateForFrame();
+            moveBalls(dt);
+            render();
+            requestAnimationFrame(doFrame);
+            updateUI();
+
+        }
+
+        //----------------------- respond to window resizing -------------------------------
+
+        /* When the window is resized, we need to adjust the aspect ratio of the camera.
+     * We also need to reset the size of the canvas that used by the renderer to
+     * match the new size of the window.
+     */
+        function doResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix(); // Need to call this for the change in aspect to take effect.
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+
+        //----------------------------------------------------------------------------------
+
+        /**
+         *  This init() function is called when by the onload event when the document has loaded.
+         */
+        function init() {
+            try {
+                try {
+                    renderer = new THREE.WebGLRenderer({
+                        antialias: true
+                    });
+                } catch (e) {
+                    document.body.innerHTML = "<h3><b>Sorry, WebGL/Three.js are required but are not available.</b><h3>";
+                    return;
+                }
+                canvas = renderer.domElement;  // The canvas was created by the renderer.
+                renderer.setSize(window.innerWidth, window.innerHeight);  // match size of canvas to window
+                window.addEventListener("resize", doResize, false);  // Set up handler for resize event
+                document.body.appendChild(canvas);  // The canvas must be added to the body of the page.
+                canvas.addEventListener("mousedown", doMouseDown);
+                canvas.addEventListener("mousemove", doMouseMove);
+                document.addEventListener("keydown", doKeyDown);
+                createWorld();
+                clock = new THREE.Clock(); // For keeping time during the animation.
+                requestAnimationFrame(doFrame);  // Start the animation.
+                // Set up interval for updating frame
+                setInterval(updateForFrame, 16); // Update approximately every 16ms (equivalent to ~60fps)
+
+                // Render the scene initially
+                render();
+
+
+            } catch (e) {
+                document.body.innerHTML = "<h3><b>Sorry, an error occurred:<br>" + e + "</b></h3>";
+            }
+        }
+
+    </script>
+</head>
+<body onload="init()">
+<div id="ui-overlay">
+    Balls Destroyed: <span id="destroyed">0</span>
+</div>
+</body>
+</html>
